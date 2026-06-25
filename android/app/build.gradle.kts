@@ -13,6 +13,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -28,6 +29,14 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        val mapsApiKey = listOfNotNull(
+            project.findProperty("GOOGLE_MAPS_API_KEY")?.toString()?.takeIf { it.isNotBlank() },
+            System.getenv("GOOGLE_MAPS_API_KEY")?.takeIf { it.isNotBlank() },
+            readMapsKeyFromEnvFile()?.takeIf { it.isNotBlank() },
+        ).firstOrNull() ?: ""
+
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {
@@ -41,4 +50,20 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+
+fun readMapsKeyFromEnvFile(): String? {
+    val envFile = rootProject.file("../.env")
+    if (!envFile.exists()) {
+        return null
+    }
+    return envFile.readLines()
+        .firstOrNull { it.startsWith("GOOGLE_MAPS_API_KEY=") }
+        ?.substringAfter("=")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
 }
