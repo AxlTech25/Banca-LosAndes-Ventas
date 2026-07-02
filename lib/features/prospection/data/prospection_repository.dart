@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../models/pre_evaluation_models.dart';
+import '../services/pre_evaluation_scoring.dart';
 
 class ProspectionRepository {
   ProspectionRepository({
@@ -41,20 +42,7 @@ class ProspectionRepository {
   Future<PreEvaluationResult> evaluateProspectOnline(
     ProspectFormData form,
   ) async {
-    try {
-      final response = await _client.functions.invoke(
-        'pre-evaluar',
-        body: form.toJson(),
-      );
-      final data = response.data;
-      if (data is Map<String, dynamic>) {
-        return PreEvaluationResult.fromJson(data);
-      }
-    } catch (_) {
-      // Edge Function mock no disponible: evaluacion local para el curso.
-    }
-
-    return _localEvaluate(form);
+    return PreEvaluationScoring.evaluateFromProspect(form);
   }
 
   Future<void> syncPendingEvaluations() async {
@@ -110,85 +98,6 @@ class ProspectionRepository {
     await _preferences.setString(_deserterKey, jsonEncode(queue));
   }
 
-  Future<PreEvaluationResult> _localEvaluate(ProspectFormData form) async {
-    final age = DateTime.now().difference(form.birthDate).inDays ~/ 365;
-    if (age < 18 || age > 75) {
-      return const PreEvaluationResult(
-        status: PreEvaluationStatus.noProcede,
-        reason: 'Edad fuera del rango permitido (18-75 anos).',
-        estimatedScore: 10,
-      );
-    }
-
-    if (form.businessAgeTotalMonths < 6) {
-      return const PreEvaluationResult(
-        status: PreEvaluationStatus.noProcede,
-        reason: 'El negocio debe tener al menos 6 meses de antiguedad.',
-        estimatedScore: 15,
-      );
-    }
-
-    final debtRatio = form.estimatedIncome <= 0
-        ? 1.0
-        : form.requestedAmount / form.estimatedIncome;
-    if (debtRatio > 3) {
-      return PreEvaluationResult(
-        status: PreEvaluationStatus.noProcede,
-        reason:
-            'El monto solicitado supera 3 veces los ingresos estimados del negocio.',
-        estimatedScore: 20,
-      );
-    }
-
-    final existingClient = await _client
-        .from('clientes')
-        .select('calificacion_sbs')
-        .eq('numero_documento', form.documentNumber)
-        .maybeSingle();
-
-    if (existingClient != null) {
-      final rating = (existingClient['calificacion_sbs'] ?? '')
-          .toString()
-          .toLowerCase();
-      if (rating.contains('dudoso') || rating.contains('perdida')) {
-        return PreEvaluationResult(
-          status: PreEvaluationStatus.noProcede,
-          reason: 'Calificacion SBS restrictiva: $rating.',
-          estimatedScore: 25,
-        );
-      }
-      if (rating.contains('deficiente') || rating.contains('cpp')) {
-        return PreEvaluationResult(
-          status: PreEvaluationStatus.revisar,
-          reason: 'Cliente existente con calificacion $rating. Requiere comite.',
-          estimatedScore: 45,
-        );
-      }
-    }
-
-    if (debtRatio > 1.5 || form.requestedAmount > 30000) {
-      return PreEvaluationResult(
-        status: PreEvaluationStatus.revisar,
-        reason: 'Relacion monto/ingreso elevada. Se recomienda analisis adicional.',
-        estimatedScore: 55,
-      );
-    }
-
-    if (debtRatio <= 0.5 && form.businessAgeTotalMonths >= 6) {
-      return const PreEvaluationResult(
-        status: PreEvaluationStatus.apto,
-        reason: 'Perfil compatible con microcredito comercial. Puede continuar.',
-        estimatedScore: 85,
-      );
-    }
-
-    return PreEvaluationResult(
-      status: PreEvaluationStatus.apto,
-      reason: 'Perfil compatible con microcredito comercial. Puede continuar.',
-      estimatedScore: 78,
-    );
-  }
-
   Future<void> _queueEvaluation(ProspectFormData form) async {
     final queue = _loadEvaluationQueue();
     queue.add({
@@ -224,7 +133,12 @@ class ProspectionRepository {
       businessAgeYears: int.parse(json['antiguedad_anos'].toString()),
       businessAgeMonths: int.parse(json['antiguedad_meses'].toString()),
       estimatedIncome: double.parse(json['ingresos_estimados'].toString()),
+      monthlyExpenses: double.tryParse(
+            json['gastos_mensuales']?.toString() ?? '',
+          ) ??
+          0,
       requestedAmount: double.parse(json['monto_solicitado'].toString()),
+      termMonths: int.tryParse(json['plazo_meses']?.toString() ?? '') ?? 18,
       creditPurpose: json['destino_credito'].toString(),
     );
   }

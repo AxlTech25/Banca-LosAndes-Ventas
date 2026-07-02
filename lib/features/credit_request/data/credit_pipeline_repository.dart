@@ -236,31 +236,128 @@ class CreditPipelineRepository {
         .toList();
   }
 
-  Future<void> assignClientAppRequest({
+  Future<String> assignClientAppRequest({
     required String solicitudId,
     required String agencyId,
   }) async {
     try {
-      await _client.rpc(
+      final result = await _client.rpc(
         'asignar_solicitud_app_cliente',
         params: {'p_solicitud_id': solicitudId},
       );
+      return result.toString();
     } on supabase.PostgrestException catch (error) {
       if (error.message.contains('asignar_solicitud_app_cliente') ||
           error.code == 'PGRST202') {
-        await _client
-            .from('solicitudes_credito')
-            .update({
-              'asesor_id': _advisorId,
-              'agencia_id': agencyId,
-              'estado': 'en_evaluacion',
-            })
-            .eq('id', solicitudId)
-            .eq('origen', 'app_cliente');
-        return;
+        return _assignClientAppRequestFallback(
+          solicitudId: solicitudId,
+          agencyId: agencyId,
+        );
       }
       rethrow;
     }
+  }
+
+  Future<String> _assignClientAppRequestFallback({
+    required String solicitudId,
+    required String agencyId,
+  }) async {
+    final solicitud = await _client
+        .from('solicitudes_credito')
+        .select('id, cliente_id, origen, asesor_id, estado')
+        .eq('id', solicitudId)
+        .maybeSingle();
+
+    if (solicitud == null) {
+      throw StateError('Solicitud no encontrada.');
+    }
+    if (solicitud['origen']?.toString() != 'app_cliente') {
+      throw StateError('Solo solicitudes de app cliente pueden asignarse.');
+    }
+
+    await _client
+        .from('solicitudes_credito')
+        .update({
+          'asesor_id': _advisorId,
+          'agencia_id': agencyId,
+          'estado': 'en_evaluacion',
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', solicitudId)
+        .eq('origen', 'app_cliente');
+
+    final assignmentDate = await _businessToday();
+    final clienteId = solicitud['cliente_id'].toString();
+
+    final existing = await _client
+        .from('cartera_diaria')
+        .select('id')
+        .eq('asesor_id', _advisorId)
+        .eq('cliente_id', clienteId)
+        .eq('fecha_asignacion', assignmentDate)
+        .maybeSingle();
+
+    String carteraId;
+    if (existing != null) {
+      carteraId = existing['id'].toString();
+      await _client.from('cartera_diaria').update({
+        'tipo_gestion': 'NUEVA_SOLICITUD',
+        'prioridad': 'normal',
+        'score_prioridad': 38,
+        'solicitud_id': solicitudId,
+        'estado_visita': 'pendiente',
+      }).eq('id', carteraId);
+    } else {
+      final inserted = await _client
+          .from('cartera_diaria')
+          .insert({
+            'asesor_id': _advisorId,
+            'cliente_id': clienteId,
+            'agencia_id': agencyId,
+            'fecha_asignacion': assignmentDate,
+            'tipo_gestion': 'NUEVA_SOLICITUD',
+            'prioridad': 'normal',
+            'score_prioridad': 38,
+            'estado_visita': 'pendiente',
+            'solicitud_id': solicitudId,
+          })
+          .select('id')
+          .single();
+      carteraId = inserted['id'].toString();
+    }
+
+    await _client
+        .from('solicitudes_credito')
+        .update({'cartera_diaria_id': carteraId})
+        .eq('id', solicitudId);
+
+    return carteraId;
+  }
+
+  Future<String> _businessToday() async {
+    try {
+      final result = await _client.rpc('business_today');
+      return _normalizeAssignmentDate(result);
+    } catch (_) {
+      return _dateOnly(DateTime.now());
+    }
+  }
+
+  String _normalizeAssignmentDate(Object? value) {
+    if (value is DateTime) {
+      return _dateOnly(value);
+    }
+    final raw = value?.toString() ?? '';
+    if (raw.length >= 10) {
+      return raw.substring(0, 10);
+    }
+    return _dateOnly(DateTime.now());
+  }
+
+  String _dateOnly(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '${value.year}-$month-$day';
   }
 
   Future<SolicitudPreEvaluation> runPreEvaluationForRequest(
@@ -864,20 +961,17 @@ class CreditPipelineRepository {
     required String consentSignatureBase64,
     required bool persist,
   }) async {
-    final clientRow = await _client
-        .from('clientes')
-        .select('calificacion_sbs')
-        .eq('id', clientId)
-        .maybeSingle();
-
-    final mock = await _mockDebtFromDocument(documentNumber, clientRow);
+    final profile = await _bureauProfileFromClient(
+      documentNumber: documentNumber,
+      clientId: clientId,
+    );
     final payload = {
-      'calificacion_sbs': mock.rating.label,
-      'entidades_con_deuda': mock.debtEntities,
-      'deuda_total_pen': mock.totalDebtPen,
-      'mayor_deuda': mock.largestDebt,
-      'dias_mayor_mora': mock.maxOverdueDays,
-      'origen': 'mock_dni',
+      'calificacion_sbs': profile.rating.label,
+      'entidades_con_deuda': profile.debtEntities,
+      'deuda_total_pen': profile.totalDebtPen,
+      'mayor_deuda': profile.largestDebt,
+      'dias_mayor_mora': profile.maxOverdueDays,
+      'origen': profile.source,
     };
 
     if (persist) {
@@ -894,11 +988,11 @@ class CreditPipelineRepository {
       id: '',
       solicitudId: solicitudId,
       documentNumber: documentNumber,
-      rating: mock.rating,
-      debtEntities: mock.debtEntities,
-      totalDebtPen: mock.totalDebtPen,
-      largestDebt: mock.largestDebt,
-      maxOverdueDays: mock.maxOverdueDays,
+      rating: profile.rating,
+      debtEntities: profile.debtEntities,
+      totalDebtPen: profile.totalDebtPen,
+      largestDebt: profile.largestDebt,
+      maxOverdueDays: profile.maxOverdueDays,
       consultedAt: DateTime.now(),
     );
   }
@@ -931,147 +1025,40 @@ class CreditPipelineRepository {
     return BureauConsultResult.fromJson(row);
   }
 
-  Future<_MockDebt> _mockDebtFromDocument(
-    String documentNumber,
-    Map<String, dynamic>? clientRow,
-  ) async {
+  Future<_BureauProfile> _bureauProfileFromClient({
+    required String documentNumber,
+    required String clientId,
+  }) async {
     try {
       final response = await _client.rpc(
-        'consultar_buro_simulado_por_dni',
-        params: {'p_dni': documentNumber},
+        'consultar_buro_por_cliente',
+        params: {
+          'p_dni': documentNumber,
+          'p_cliente_id': clientId,
+        },
       );
       if (response is Map<String, dynamic>) {
-        return _MockDebt(
+        return _BureauProfile(
           rating: SbsRating.fromCode(response['calificacion_sbs']?.toString()),
           debtEntities: (response['entidades_con_deuda'] as num?)?.toInt() ?? 0,
           totalDebtPen: (response['deuda_total_pen'] as num?)?.toDouble() ?? 0,
           largestDebt: (response['mayor_deuda'] as num?)?.toDouble() ?? 0,
           maxOverdueDays: (response['dias_mayor_mora'] as num?)?.toInt() ?? 0,
+          source: response['origen']?.toString() ?? 'perfil_cliente',
         );
       }
     } catch (_) {
-      // RPC no disponible: mock local por ultimo digito del DNI.
+      // RPC no disponible: perfil limpio por defecto.
     }
 
-    final digits = documentNumber.replaceAll(RegExp(r'\D'), '');
-    final lastDigit = digits.isEmpty ? 7 : int.parse(digits[digits.length - 1]);
-    return _mockDebtForDniDigit(lastDigit);
-  }
-
-  _MockDebt _mockDebtForDniDigit(int digit) {
-    return switch (digit) {
-      0 => const _MockDebt(
-        rating: SbsRating.normal,
-        debtEntities: 1,
-        totalDebtPen: 4500,
-        largestDebt: 4500,
-        maxOverdueDays: 0,
-      ),
-      1 => const _MockDebt(
-        rating: SbsRating.normal,
-        debtEntities: 2,
-        totalDebtPen: 3200,
-        largestDebt: 2000,
-        maxOverdueDays: 0,
-      ),
-      2 => const _MockDebt(
-        rating: SbsRating.cpp,
-        debtEntities: 2,
-        totalDebtPen: 4800,
-        largestDebt: 3200,
-        maxOverdueDays: 12,
-      ),
-      3 => const _MockDebt(
-        rating: SbsRating.normal,
-        debtEntities: 1,
-        totalDebtPen: 2800,
-        largestDebt: 2800,
-        maxOverdueDays: 0,
-      ),
-      4 => const _MockDebt(
-        rating: SbsRating.deficient,
-        debtEntities: 3,
-        totalDebtPen: 9200,
-        largestDebt: 5100,
-        maxOverdueDays: 45,
-      ),
-      5 => const _MockDebt(
-        rating: SbsRating.normal,
-        debtEntities: 0,
-        totalDebtPen: 0,
-        largestDebt: 0,
-        maxOverdueDays: 0,
-      ),
-      6 => const _MockDebt(
-        rating: SbsRating.cpp,
-        debtEntities: 1,
-        totalDebtPen: 1500,
-        largestDebt: 1500,
-        maxOverdueDays: 5,
-      ),
-      7 => const _MockDebt(
-        rating: SbsRating.normal,
-        debtEntities: 1,
-        totalDebtPen: 1200,
-        largestDebt: 1200,
-        maxOverdueDays: 0,
-      ),
-      8 => const _MockDebt(
-        rating: SbsRating.doubtful,
-        debtEntities: 4,
-        totalDebtPen: 15000,
-        largestDebt: 8000,
-        maxOverdueDays: 90,
-      ),
-      _ => const _MockDebt(
-        rating: SbsRating.loss,
-        debtEntities: 5,
-        totalDebtPen: 22000,
-        largestDebt: 12000,
-        maxOverdueDays: 180,
-      ),
-    };
-  }
-
-  _MockDebt _mockDebtForRating(String ratingLabel) {
-    final rating = SbsRating.fromCode(ratingLabel);
-    return switch (rating) {
-      SbsRating.normal => const _MockDebt(
-        rating: SbsRating.normal,
-        debtEntities: 1,
-        totalDebtPen: 1200,
-        largestDebt: 1200,
-        maxOverdueDays: 0,
-      ),
-      SbsRating.cpp => const _MockDebt(
-        rating: SbsRating.cpp,
-        debtEntities: 2,
-        totalDebtPen: 4800,
-        largestDebt: 3200,
-        maxOverdueDays: 12,
-      ),
-      SbsRating.deficient => const _MockDebt(
-        rating: SbsRating.deficient,
-        debtEntities: 3,
-        totalDebtPen: 9200,
-        largestDebt: 5100,
-        maxOverdueDays: 45,
-      ),
-      SbsRating.doubtful => const _MockDebt(
-        rating: SbsRating.doubtful,
-        debtEntities: 4,
-        totalDebtPen: 15000,
-        largestDebt: 8000,
-        maxOverdueDays: 90,
-      ),
-      SbsRating.loss => const _MockDebt(
-        rating: SbsRating.loss,
-        debtEntities: 5,
-        totalDebtPen: 22000,
-        largestDebt: 12000,
-        maxOverdueDays: 180,
-      ),
-    };
+    return const _BureauProfile(
+      rating: SbsRating.normal,
+      debtEntities: 0,
+      totalDebtPen: 0,
+      largestDebt: 0,
+      maxOverdueDays: 0,
+      source: 'sin_registro',
+    );
   }
 
   Future<void> _queueBureauConsult(Map<String, dynamic> payload) async {
@@ -1119,6 +1106,19 @@ class CreditPipelineRepository {
     if (row == null) {
       return null;
     }
+
+    final payload = row['resultado_json'];
+    if (payload is Map<String, dynamic>) {
+      final origen = payload['origen']?.toString();
+      if (origen == 'ultimo_digito' ||
+          origen == 'mock_dni' ||
+          origen == 'demo_caso' ||
+          origen == 'creditos_internos' ||
+          origen == 'perfil_buro_cliente') {
+        return null;
+      }
+    }
+
     return BureauConsultResult.fromJson(row);
   }
 
@@ -1128,13 +1128,14 @@ class CreditPipelineRepository {
   }
 }
 
-class _MockDebt {
-  const _MockDebt({
+class _BureauProfile {
+  const _BureauProfile({
     required this.rating,
     required this.debtEntities,
     required this.totalDebtPen,
     required this.largestDebt,
     required this.maxOverdueDays,
+    required this.source,
   });
 
   final SbsRating rating;
@@ -1142,6 +1143,7 @@ class _MockDebt {
   final double totalDebtPen;
   final double largestDebt;
   final int maxOverdueDays;
+  final String source;
 }
 
 extension on BureauConsultResult {

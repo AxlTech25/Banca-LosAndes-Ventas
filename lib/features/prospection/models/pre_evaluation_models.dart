@@ -32,6 +32,10 @@ class ProspectFormData {
     required this.estimatedIncome,
     required this.requestedAmount,
     required this.creditPurpose,
+    this.monthlyExpenses = 0,
+    this.termMonths = 18,
+    this.estimatedInstallment,
+    this.referenceTea = 43.92,
   });
 
   final String documentNumber;
@@ -44,6 +48,10 @@ class ProspectFormData {
   final double estimatedIncome;
   final double requestedAmount;
   final String creditPurpose;
+  final double monthlyExpenses;
+  final int termMonths;
+  final double? estimatedInstallment;
+  final double referenceTea;
 
   int get businessAgeTotalMonths =>
       (businessAgeYears * 12) + businessAgeMonths;
@@ -60,6 +68,8 @@ class ProspectFormData {
       'ingresos_estimados': estimatedIncome,
       'monto_solicitado': requestedAmount,
       'destino_credito': creditPurpose,
+      if (monthlyExpenses > 0) 'gastos_mensuales': monthlyExpenses,
+      'plazo_meses': termMonths,
     };
   }
 

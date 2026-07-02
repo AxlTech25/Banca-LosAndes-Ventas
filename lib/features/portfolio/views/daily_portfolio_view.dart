@@ -51,6 +51,7 @@ import '../../route/views/route_map_view.dart';
 import '../../supervision/views/coverage_monitor_view.dart';
 import '../../supervision/views/supervision_reports_hub_view.dart';
 import '../services/portfolio_nightly_sync_service.dart';
+import '../../../core/events/portfolio_refresh_signal.dart';
 import '../data/daily_portfolio_repository.dart';
 import '../models/daily_client.dart';
 import '../viewmodels/daily_portfolio_view_model.dart';
@@ -101,11 +102,13 @@ class _DailyPortfolioViewState extends State<DailyPortfolioView> {
   void initState() {
     super.initState();
     _advisorDisplayName = widget.session.displayName;
+    PortfolioRefreshSignal.instance.version.addListener(_onPortfolioRefreshSignal);
     _initializePortfolio();
   }
 
   @override
   void dispose() {
+    PortfolioRefreshSignal.instance.version.removeListener(_onPortfolioRefreshSignal);
     _viewModel?.dispose();
     _alertsViewModel?.dispose();
     _campaignsViewModel?.dispose();
@@ -223,6 +226,10 @@ class _DailyPortfolioViewState extends State<DailyPortfolioView> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _onPortfolioRefreshSignal() {
+    _viewModel?.refreshAfterCaseAssignment();
   }
 
   Future<void> _refreshProfileStats() async {
@@ -437,8 +444,8 @@ class _DailyPortfolioViewState extends State<DailyPortfolioView> {
     );
   }
 
-  void _openCreditRequests({int initialTabIndex = 0}) {
-    Navigator.of(context).push(
+  void _openCreditRequests({int initialTabIndex = 0}) async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CreditRequestListView(
           session: widget.session,
@@ -446,6 +453,7 @@ class _DailyPortfolioViewState extends State<DailyPortfolioView> {
         ),
       ),
     );
+    await _viewModel?.refreshAfterCaseAssignment();
   }
 
   void _openDocumentsHub() {

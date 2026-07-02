@@ -1,12 +1,12 @@
 {
-    "name": "appbanco_losandes_ventas",
-    "short_name": "appbanco_losandes_ventas",
+    "name": "Banco Los Andes - Fuerza de Ventas",
+    "short_name": "Los Andes Ventas",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#051424",
+    "theme_color": "#00C1F9",
+    "description": "Modulo web de ventas: cartera, solicitudes, evaluacion y cobranza.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

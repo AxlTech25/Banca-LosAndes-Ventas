@@ -140,6 +140,25 @@ class DailyPortfolioViewModel extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshAfterCaseAssignment() async {
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      final refreshed = await _repository.refreshAfterCaseAssignment();
+      _clients
+        ..clear()
+        ..addAll(refreshed);
+      await _repository.syncPendingVisits();
+    } catch (_) {
+      errorMessage = 'No se pudo actualizar la cartera tras tomar el caso.';
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
+  }
+
   void selectFilter(PortfolioFilter filter) {
     selectedFilter = filter;
     notifyListeners();

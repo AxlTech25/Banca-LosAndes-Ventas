@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
+import '../../../core/events/portfolio_refresh_signal.dart';
 import '../../../features/auth/models/auth_session.dart';
 import '../../../core/theme/web_theme.dart';
 import '../../../features/portfolio/data/daily_portfolio_repository.dart';
@@ -24,13 +25,19 @@ class _WebPortfolioPageState extends State<WebPortfolioPage> {
   @override
   void initState() {
     super.initState();
+    PortfolioRefreshSignal.instance.version.addListener(_onPortfolioRefreshSignal);
     _init();
   }
 
   @override
   void dispose() {
+    PortfolioRefreshSignal.instance.version.removeListener(_onPortfolioRefreshSignal);
     _viewModel?.dispose();
     super.dispose();
+  }
+
+  void _onPortfolioRefreshSignal() {
+    _viewModel?.refreshAfterCaseAssignment();
   }
 
   Future<void> _init() async {
@@ -81,7 +88,7 @@ class _WebPortfolioPageState extends State<WebPortfolioPage> {
                 ),
               ),
               IconButton(
-                onPressed: vm.load,
+                onPressed: vm.refreshAfterCaseAssignment,
                 icon: const Icon(Icons.refresh),
                 tooltip: 'Actualizar cartera',
               ),

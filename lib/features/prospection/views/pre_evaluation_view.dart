@@ -120,7 +120,9 @@ class _PreEvaluationViewState extends State<PreEvaluationView> {
                             businessAgeYears: viewModel.businessAgeYears,
                             businessAgeMonths: viewModel.businessAgeMonths,
                             estimatedIncome: viewModel.estimatedIncome,
+                            monthlyExpenses: viewModel.monthlyExpenses,
                             requestedAmount: viewModel.requestedAmount,
+                            termMonths: viewModel.termMonths,
                             creditPurpose: viewModel.creditPurpose.trim(),
                           ),
                         ),
@@ -266,6 +268,32 @@ class _PreEvaluationViewState extends State<PreEvaluationView> {
               decoration: _inputDecoration('S/ 2500'),
               onChanged: (value) {
                 viewModel.estimatedIncome = double.tryParse(value) ?? 0;
+                viewModel.resetResult();
+              },
+            ),
+            const SizedBox(height: 12),
+            const _FieldLabel('Gastos mensuales del negocio'),
+            TextField(
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: AppColors.onSurface),
+              decoration: _inputDecoration(
+                'S/ 0 = estimar 40% de ingresos',
+              ),
+              onChanged: (value) {
+                viewModel.monthlyExpenses = double.tryParse(value) ?? 0;
+                viewModel.resetResult();
+              },
+            ),
+            const SizedBox(height: 12),
+            _FieldLabel('Plazo: ${viewModel.termMonths} meses'),
+            Slider(
+              value: viewModel.termMonths.toDouble(),
+              min: 3,
+              max: 36,
+              divisions: 33,
+              label: '${viewModel.termMonths}',
+              onChanged: (value) {
+                viewModel.termMonths = value.round();
                 viewModel.resetResult();
               },
             ),

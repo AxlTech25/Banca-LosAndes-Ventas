@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
+import '../../../core/events/portfolio_refresh_signal.dart';
 import '../data/credit_pipeline_repository.dart';
 import '../models/pipeline_models.dart';
 import '../services/transmission_checklist.dart';
@@ -57,6 +58,7 @@ class ClientAppInboxViewModel extends ChangeNotifier {
         agencyId: _agencyId,
       );
       _requests.removeWhere((request) => request.id == solicitudId);
+      PortfolioRefreshSignal.instance.notifyChanged();
       return true;
     } catch (error) {
       errorMessage = error.toString();

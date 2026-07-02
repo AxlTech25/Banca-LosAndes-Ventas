@@ -17,7 +17,9 @@ class PreEvaluationViewModel extends ChangeNotifier {
   int businessAgeYears = 1;
   int businessAgeMonths = 0;
   double estimatedIncome = 2000;
+  double monthlyExpenses = 0;
   double requestedAmount = 5000;
+  int termMonths = 18;
   String creditPurpose = '';
 
   bool isSubmitting = false;
@@ -71,7 +73,9 @@ class PreEvaluationViewModel extends ChangeNotifier {
           businessAgeYears: businessAgeYears,
           businessAgeMonths: businessAgeMonths,
           estimatedIncome: estimatedIncome,
+          monthlyExpenses: monthlyExpenses,
           requestedAmount: requestedAmount,
+          termMonths: termMonths,
           creditPurpose: creditPurpose.trim(),
         ),
       );

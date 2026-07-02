@@ -110,6 +110,16 @@ class DailyPortfolioRepository {
     return _applyLocalOrder(clients, activeDate);
   }
 
+  /// Tras tomar un caso de app cliente, forzar lectura del dia operativo actual.
+  Future<void> invalidateQueryDateCache() async {
+    await _preferences.remove(_queryDateKey);
+  }
+
+  Future<List<DailyClient>> refreshAfterCaseAssignment() async {
+    await invalidateQueryDateCache();
+    return refreshTodayPortfolio();
+  }
+
   Future<void> saveManualOrder(List<DailyClient> clients) async {
     final queryDate = await _queryDateForCache();
     final orderedIds = clients.map((client) => client.id).toList();

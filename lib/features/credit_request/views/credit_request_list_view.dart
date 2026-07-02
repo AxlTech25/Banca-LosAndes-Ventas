@@ -269,7 +269,11 @@ class _CreditRequestListViewState extends State<CreditRequestListView>
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Caso asignado: ${request.clientName}')),
+      SnackBar(
+        content: Text(
+          'Caso asignado: ${request.clientName}. Ya aparece en su cartera del dia.',
+        ),
+      ),
     );
 
     await CreditRequestDetailView.open(
